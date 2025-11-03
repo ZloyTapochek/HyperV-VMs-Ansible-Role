@@ -1,0 +1,34 @@
+vhdx_filename: "noble-server.vhdx" # Имя файла, который был получен путем конвертации с ипользование qemu
+base_vms_dir: "D:\\VMOrigin" # Путь, где лежит .vhdx на удаленном хосте
+switch_name: "LanSwitch" # Наименование коммутатора в hyper-v
+username: zloytapochek # Имя пользователя на будущих машинках
+ssh_key: "{{ lookup('ansible.builtin.env', 'SSH_KEY') }}" # Публичный ключ для добавления на машинку
+vms:
+  - name: vm1
+    hostname: vm1.local
+    instance_id: vm1-001
+    ip_address: "192.168.0.21"
+    memory: 4GB
+    cpu: 2
+    iso_path: "{{ base_vms_dir }}\\vm1\\cidata.iso"
+    vhdx_path: "{{ base_vms_dir }}\\vm1\\{{ vhdx_filename }}"
+    vhdx_size: "40GB"
+  - name: vm2
+    hostname: vm2.local
+    instance_id: vm2-002
+    ip_address: "192.168.0.22"
+    memory: 4GB
+    cpu: 2
+    iso_path: "{{ base_vms_dir }}\\vm2\\cidata.iso"
+    vhdx_path: "{{ base_vms_dir }}\\vm2\\{{ vhdx_filename }}"
+    vhdx_size: "40GB"
+  - name: vm3
+    hostname: vm3.local
+    instance_id: vm3-003
+    ip_address: "192.168.0.23"
+    memory: 4GB
+    cpu: 2
+    iso_path: "{{ base_vms_dir }}\\vm3\\cidata.iso"
+    vhdx_path: "{{ base_vms_dir }}\\vm3\\{{ vhdx_filename }}"
+    vhdx_size: "40GB"
+

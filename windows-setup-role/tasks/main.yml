@@ -1,0 +1,123 @@
+---
+- name: Включение Hyper-V на Windows
+  ansible.windows.win_powershell:
+    script: |
+      $ErrorActionPreference = 'Stop'
+      try {
+        $feature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -ErrorAction SilentlyContinue
+        if ($feature.State -eq 'Enabled') {
+          Write-Output "Hyper-V уже включён"
+          exit 0
+        }
+
+        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart
+        Write-Output "Hyper-V успешно включён. Требуется перезагрузка."
+        exit 0
+      } catch {
+        Write-Error "Ошибка при включении Hyper-V: $($_.Exception.Message)"
+        exit 1
+      }
+  register: hyperv_result
+  changed_when: "'включён' in hyperv_result.output[0] and 'уже' not in hyperv_result.output[0]"
+  failed_when: hyperv_result.output[0] is defined and 'Ошибка' in hyperv_result.output[0]
+  notify: Перезагрузить Windows
+
+
+#############################################
+# Блок работы с диском .vhdx
+#############################################
+
+- name: Проверка наличия файла "{{ vhdx_filename }}"
+  ansible.windows.win_find:
+    paths: "{{ base_vms_dir }}"
+    patterns: "{{ vhdx_filename }}"
+    file_type: file
+  register: file_search
+
+- name: Файл "{{ vhdx_filename }}" не найден
+  ansible.builtin.fail:
+    msg: "ОШИБКА: Файл {{ base_vms_dir }}\\{{ vhdx_filename }} не найден!"
+  when: file_search.files | length == 0 or file_search.files[0].exists != true
+
+- name: Создаем директории для ВМ
+  ansible.windows.win_file:
+    path: "{{ base_vms_dir }}\\{{ item.name }}"
+    state: directory
+  loop: "{{ vms }}"
+
+- name: Копируем файлы дисков в директории
+  ansible.windows.win_copy:
+    src: "{{ base_vms_dir }}\\{{ vhdx_filename }}"
+    dest: "{{ base_vms_dir }}\\{{ item.name }}\\{{ vhdx_filename }}"
+    remote_src: true
+  loop: "{{ vms }}"
+
+#############################################
+# Блок работы с генерацией cloud-init
+#############################################
+
+- name: Создаем директории для cloud-init
+  ansible.windows.win_file:
+    path: "{{ base_vms_dir }}\\{{ item.name }}\\cloud-init"
+    state: directory
+  loop: "{{ vms }}"
+
+- name: Генерация user-data для всех ВМ
+  ansible.windows.win_template:
+    src: user-data.j2
+    dest: "{{ base_vms_dir }}\\{{ item.name }}\\cloud-init\\user-data"
+    force: true
+  loop: "{{ vms }}"
+
+- name: Генерация meta-data для всех ВМ
+  ansible.windows.win_template:
+    src: meta-data.j2
+    dest: "{{ base_vms_dir }}\\{{ item.name }}\\cloud-init\\meta-data"
+    force: true
+  loop: "{{ vms }}"
+
+- name: Проверка наличия Chocolatey
+  ansible.windows.win_command: choco --version
+  register: choco_check
+  ignore_errors: yes
+
+- name: Установка Chocolatey, если отсутствует
+  ansible.windows.win_shell: Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+  when: choco_check.failed
+
+- name: Установка Windows ADK Oscdimg с помощью Chocolatey
+  chocolatey.chocolatey.win_chocolatey:
+    name: windows-adk-oscdimg
+    state: present
+
+- name: Создание iso с помощью oscdimg в заданной директории
+  ansible.windows.win_command:
+    cmd: 'oscdimg -n -m -o -l"cidata" cloud-init cidata.iso'
+    chdir: '{{ base_vms_dir }}\\{{ item.name }}'
+  loop: "{{ vms }}"
+
+- name: Создать и запустить виртуальную машину Hyper-V
+  win_shell: |
+    $vmExists = Get-VM -Name "{{ item.name }}" -ErrorAction SilentlyContinue
+    if ($null -eq $vmExists) {
+      New-VM -Name "{{ item.name }}" `
+        -MemoryStartupBytes {{ item.memory }} `
+        -Generation 2 `
+        -SwitchName "{{ switch_name }}" `
+        -VHDPath "{{ item.vhdx_path }}" `
+        -Path "{{ base_vms_dir }}\{{ item.name }}"
+      
+      Resize-VHD -Path {{ item.vhdx_path }} -SizeBytes {{ item.vhdx_size }} 
+      Add-VMDvdDrive -VMName "{{ item.name }}" -ControllerNumber 0 -ControllerLocation 1 -Path "{{ item.iso_path }}"
+      Set-VM -Name "{{ item.name }}" -CheckpointType Disabled
+      Set-VMFirmware -VMName "{{ item.name }}" -EnableSecureBoot Off
+      Start-VM -Name "{{ item.name }}"
+      Write-Output "VM {{ item.name }} created and started"
+    } else {
+      Write-Output "VM {{ item.name }} already exists"
+    }
+  loop: "{{ vms }}"
+  register: create_vm_results
+  changed_when: "'created' in create_vm_results.stdout"
+
+
