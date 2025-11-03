@@ -1,0 +1,40 @@
+#cloud-config
+
+hostname: {{ item.hostname }}
+
+users:
+  - default
+  - name: {{ username }}
+    shell: /bin/bash
+    lock-passwd: false
+    ssh_pwauth: true
+    chpasswd:
+      expire: false
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    groups: users, admin
+    ssh_authorized_keys:
+      - "{{ ssh_key }}"
+  - name: root
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - net-tools
+
+network:
+  version: 2
+  ethernets:
+    eth0:
+      dhcp4: no
+      addresses:
+        - {{ item.ip_address }}/24
+      gateway4: 192.168.0.1
+      nameservers:
+        addresses: [8.8.8.8]
+
+chpasswd:
+  expire: false
+  users:
+  - {name: root, password: root, type: text}
+  - {name: zloytapochek, password: zloytapochek, type: text}

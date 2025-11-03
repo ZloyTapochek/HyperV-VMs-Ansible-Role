@@ -1,0 +1,6 @@
+---
+- name: Выполнение роли windows-setup-role на Windows хостах
+  hosts: win_hosts
+  gather_facts: false
+  roles:
+    - windows-setup-role
